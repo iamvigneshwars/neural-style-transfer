@@ -7,31 +7,13 @@ from PIL import Image
 import torchvision.transforms as transforms
 import torchvision.models as models
 import torchvision
+import argparse
 import copy
-
-
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-# Desired image size
-imsize = 512
-loader = transforms.Compose([
-    transforms.Resize((imsize, imsize)),  
-    transforms.ToTensor()])
 
 def image_loader(image_name):
     image = Image.open(image_name)
     image = loader(image).unsqueeze(0)
-
     return image.to(device, torch.float)
-
-
-style_img = image_loader("picasso.jpg")
-content_img = image_loader("dancer.jpg")
-
-
-# Pretrained CNN model
-cnn = models.vgg19(pretrained=True).features.to(device).eval()
-
 
 class ContentLoss(nn.Module):
 
@@ -59,7 +41,6 @@ class StyleLoss(nn.Module):
         self.loss = F.mse_loss(G, self.target)
         return input
 
-
 class Normalization(nn.Module):
     def __init__(self):
         super(Normalization, self).__init__()
@@ -72,33 +53,24 @@ class Normalization(nn.Module):
         return (img - self.mean) / self.std
 
 
-# desired depth layers to compute style/content losses :
-
 def get_style_model_and_losses(cnn,style_img, content_img):
-    # normalization module
     normalization = Normalization().to(device)
+    # Desired layers to calculate content and style loss
     content_layers = ['conv_4']
     style_layers = ['conv_1', 'conv_2', 'conv_3', 'conv_4', 'conv_5']
 
-    # just in order to have an iterable access to or list of content/syle
-    # losses
     content_losses = []
     style_losses = []
 
-    # assuming that cnn is a nn.Sequential, so we make a new nn.Sequential
-    # to put in modules that are supposed to be activated sequentially
     model = nn.Sequential(normalization)
 
-    i = 0  # increment every time we see a conv
+    i = 0 
     for layer in cnn.children():
         if isinstance(layer, nn.Conv2d):
             i += 1
             name = 'conv_{}'.format(i)
         elif isinstance(layer, nn.ReLU):
             name = 'relu_{}'.format(i)
-            # The in-place version doesn't play very nicely with the ContentLoss
-            # and StyleLoss we insert below. So we replace with out-of-place
-            # ones here.
             layer = nn.ReLU(inplace=False)
         elif isinstance(layer, nn.MaxPool2d):
             name = 'pool_{}'.format(i)
@@ -109,49 +81,44 @@ def get_style_model_and_losses(cnn,style_img, content_img):
 
         model.add_module(name, layer)
 
+        # If the current layer is in desired content layers,
+        # add it to the the model
         if name in content_layers:
-            # add content loss:
             target = model(content_img).detach()
             content_loss = ContentLoss(target)
             model.add_module("content_loss_{}".format(i), content_loss)
             content_losses.append(content_loss)
 
+        # If the current layer is in desired style layers,
+        # add it to the the sequential model
         if name in style_layers:
-            # add style loss:
             target_feature = model(style_img).detach()
             style_loss = StyleLoss(target_feature)
             model.add_module("style_loss_{}".format(i), style_loss)
             style_losses.append(style_loss)
 
-    # now we trim off the layers after the last content and style losses
+    # Trim the layers after last content or style layer
     for i in range(len(model) - 1, -1, -1):
         if isinstance(model[i], ContentLoss) or isinstance(model[i], StyleLoss):
             break
-
     model = model[:(i + 1)]
-
     return model, style_losses, content_losses
 
 
 def get_input_optimizer(input_img):
-    # this line to show that input is a parameter that requires a gradient
     optimizer = optim.LBFGS([input_img])
     return optimizer
 
-def run_style_transfer(cnn,content_img, style_img, input_img, num_steps=300,
-                       style_weight=1000000, content_weight=1):
-    """Run the style transfer."""
-    print('Building the style transfer model..')
+def main(cnn,content_img, style_img, input_img, num_steps,style_weight, content_weight):
+
     model, style_losses, content_losses = get_style_model_and_losses(cnn,style_img, content_img)
 
-    # We want to optimize the input and not the model parameters so we
-    # update all the requires_grad fields accordingly
+    # Optimize the input image not the network
     input_img.requires_grad_(True)
     model.requires_grad_(False)
-
     optimizer = get_input_optimizer(input_img)
 
-    print('Optimizing..')
+    print('#####Optimizing Image#####')
     run = [0]
     while run[0] <= num_steps:
 
@@ -178,7 +145,7 @@ def run_style_transfer(cnn,content_img, style_img, input_img, num_steps=300,
 
             run[0] += 1
             if run[0] % 50 == 0:
-                print("run {}:".format(run))
+                print("Epoch {}:".format(run))
                 print('Style Loss : {:4f} Content Loss: {:4f}'.format(
                     style_score.item(), content_score.item()))
                 print()
@@ -187,15 +154,39 @@ def run_style_transfer(cnn,content_img, style_img, input_img, num_steps=300,
 
         optimizer.step(closure)
 
-    # a last correction...
     with torch.no_grad():
         input_img.clamp_(0, 1)
 
     return input_img
 
 
-input_img = content_img.clone()
+if __name__ == "__main__":
 
-output = run_style_transfer(cnn, content_img, style_img, input_img)
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-c', help = "content image", required = True)
+    parser.add_argument('-s', help = "style image", required = True)
+    parser.add_argument('-style_weight', help = "style weight", type = int, default = 1000000)
+    parser.add_argument('-content_weight', help = "content weight",type = int,  default = 1)
+    parser.add_argument('-steps', help = "number of steps",type = int,  default = 300)
+    parser.add_argument('-save', help = "generated image name",type = str,required = True) 
+    args = parser.parse_args()
 
-torchvision.utils.save_image(output, 'output-{}.png'.format(20))
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # Desired image size
+    imsize = 512
+    loader = transforms.Compose([
+        transforms.Resize((imsize, imsize)),  
+        transforms.ToTensor()])
+
+    style_img = image_loader(args.s)
+    content_img = image_loader(args.c)
+
+    # Pretrained CNN model
+    cnn = models.vgg19(pretrained=True).features.to(device).eval()
+
+    input_img = content_img.clone()
+
+    output = main(cnn, content_img, style_img, input_img,args.steps, args.style_weight, args.content_weight)
+
+    torchvision.utils.save_image(output, args.save + ".png")
+    print("Image Saved")
