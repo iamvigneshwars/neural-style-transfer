@@ -18,3 +18,7 @@ To Transfer style:
 python transfer_style.py -c <CONTENT_IMG> -s <STYLE_IMG> -save <NAME_OF_NEWIMG>
 
 ```
+
+## Demo
+
+![](https://github.com/iamvigneshwars/neural-style-transfer/blob/main/demo.png) 
