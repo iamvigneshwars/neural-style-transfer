@@ -5,12 +5,12 @@ The style of an image is transfered to an another image by optimizing the genera
 ## Usage
 
 Command line arguments: <br>
-`-c` Content image (to which the style has to be transfered)
-`-s` Style image (from which the style has to be transfered)
-`-content_weight` Content loss weight
-`-style_weight` Style loss weight
-`-steps` Number of optimization steps for gradient descent
-`-save` Name for the new generated image
+`-c` Content image (to which the style has to be transfered) <br>
+`-s` Style image (from which the style has to be transfered) <br>
+`-content_weight` Content loss weight <br>
+`-style_weight` Style loss weight <br>
+`-steps` Number of optimization steps for gradient descent <br>
+`-save` Name for the new generated image <br>
 
 
 To Transfer style:
